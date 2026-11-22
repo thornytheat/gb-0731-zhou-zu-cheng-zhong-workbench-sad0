@@ -14,6 +14,7 @@
 | M5 偏载判级 | 核查左重、右重和临界偏载 | `GET /api/balance` | `app/modules/m5_balance/thresholds.py` `app/modules/m5_balance/service.py` | `tests/test_balance.py` |
 | M6 整车磅单勾稽 | 审核磅单版次、差额和待复秤原因 | `GET /api/reconcile` | `app/modules/m6_reconcile/tickets.py` `app/modules/m6_reconcile/service.py` | `tests/test_reconcile.py` |
 | M7 称重批次 | 提交样例、重算、追溯并下载复核包 | `POST /api/batches` | `app/modules/m7_batches/service.py` `app/modules/m7_batches/export.py` `app/store.py` | `tests/test_batches.py` |
+| M8 趟次结算 | 划分趟次边界、核对过磅归属并选出计费重量 | `GET /api/settlement` | `app/modules/m8_settlement/trips.py` `app/modules/m8_settlement/wheels.py` `app/modules/m8_settlement/export.py` | `tests/test_settlement.py` `tests/test_shift_batches.py` |
 
 ## 陷阱登记
 
@@ -36,11 +37,19 @@
 | TRAP-19 | 0019 两个左轮争同一右轮 | 贪心配对凭空造轴 | 双向唯一才配对 | `app/modules/m4_axles/pair.py` | `tests/test_axles.py::test_nearest_pair_would_invent_axle_when_candidates_conflict` |
 | TRAP-23 | 0007 触发恰好在前证书右端 | 一轮发给两版证书 | 生效区间左闭右开 | `app/modules/m2_calibration/service.py` | `tests/test_calibration.py::test_exact_handoff_uses_new_certificate_and_no_double_match` |
 | TRAP-25 | `certificates.csv` 两张右轮证书叠期 | 随机取一张 | 隔离触发并带两张证书行 | `app/modules/m2_calibration/service.py` | `tests/test_calibration.py::test_overlap_isolates_with_both_certificates` |
+| TRAP-30 | 一趟留下进磅、移位复磅、回磅三条过磅 | 每次过磅单独出账，同趟重复计费 | 语义状态机合为一趟，毛重取合格复磅、皮重取回磅，仅两条计费 | `app/modules/m8_settlement/trips.py` | `tests/test_settlement.py::test_regross_corrects_gross_and_keeps_all_three_weighings` |
+| TRAP-31 | 相邻两趟时间接近 | 按时间窗硬合并成一趟 | 以进磅/回磅语义定边界，回磅闭趟、新进磅开趟 | `app/modules/m8_settlement/trips.py` | `tests/test_settlement.py::test_adjacent_trips_never_merged_by_time_window` |
+| TRAP-32 | 复磅与进磅磅单/轮载对不上 | 直接采信最新过磅 | 轮载与磅单差额超 50 kg 判 `TRIP_TICKET_UNVERIFIED`，不可计费 | `app/modules/m8_settlement/trips.py` | `tests/test_settlement.py::test_settlement_requires_ticket_and_wheel_corroboration` |
+| TRAP-33 | T104 整车严重偏载 | 仍出计费重量 | 任一过磅档案判严重偏载即整趟暂挂，不出毛重/皮重 | `app/modules/m8_settlement/wheels.py` | `tests/test_settlement.py::test_severe_balance_trip_is_held_without_billing_weight` |
+| TRAP-34 | T105 缺右轮且同版次两条回磅冲突 | 贪心配轮或随机取磅单 | 缺轮隔离整趟、同版次冲突投票全部留证并暂挂 | `app/modules/m8_settlement/trips.py` | `tests/test_settlement.py::test_missing_wheel_and_revision_conflict_hold_trip` |
+| TRAP-35 | SW-018 晚到的高版次复磅 | 当作乱序丢弃或改写已出账 | 晚到标记保留并归入开放趟次，连同原依据与缺证原因留档；已闭趟无进磅的 SW-017 判无主 | `app/modules/m8_settlement/weighings.py` `app/modules/m8_settlement/trips.py` | `tests/test_settlement.py::test_open_trip_and_late_regross_retain_evidence` |
+| TRAP-36 | 配对问题对同一源行重复记账 | 触发流水对不上 | 按源行引用去重，`原始 = 有效 + 重复 + 隔离` 且成轴引用为有效集子集 | `app/modules/m8_settlement/service.py` | `tests/test_settlement.py::test_trigger_ledger_conserves_source_lines` |
 
 ## 对账规则
 
 - 原始触发 = 有效触发 + 重复触发 + 隔离触发。空行、重复表头、磅单异常独立计数。
 - 整车差额 = 静态总重 − 确认车轴的左右轮载合计。缺少有效磅单时差额留空。
+- 趟次班次另计：趟次 = 结算 + 暂挂；计费净重 = 各结算趟（计费毛重 − 计费皮重）之和；无主过磅不进任何趟次。
 
 ## 已知不覆盖
 

@@ -10,7 +10,8 @@ templates = Jinja2Templates(directory=ROOT / "app/templates")
 
 MODULES = (
     ("intake", "采样验收"), ("calibration", "传感器标定"), ("debounce", "脉冲去抖"),
-    ("axles", "轴组重建"), ("balance", "偏载判级"), ("reconcile", "整车磅单勾稽"), ("batches", "称重批次"),
+    ("axles", "轴组重建"), ("balance", "偏载判级"), ("reconcile", "整车磅单勾稽"),
+    ("settlement", "趟次结算"), ("batches", "称重批次"),
 )
 
 

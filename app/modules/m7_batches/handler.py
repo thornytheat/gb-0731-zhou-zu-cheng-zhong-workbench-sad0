@@ -5,6 +5,10 @@ from pydantic import BaseModel
 
 from app.modules.m7_batches.export import export_bundle
 from app.modules.m7_batches.service import commit_sample, replay_sample
+from app.modules.m8_settlement.export import export_shift
+from app.sources import read_sources
+from app.modules.m8_settlement.pipeline import run_shift_pipeline
+from app.modules.m7_batches.pipeline import run_pipeline
 
 router = APIRouter(prefix="/api/batches", tags=["称重批次"])
 
@@ -33,6 +37,19 @@ def create_batch(payload: RunInput, request: Request, response: Response):
     return {"manifest": manifest, "reused": reused}
 
 
+@router.get("/export/shift")
+def export_live_shift(request: Request, sample: str = "shift"):
+    sources = read_sources(request.app.state.settings.source_dir, sample)
+    results = run_shift_pipeline(sources) if sample == "shift" else run_pipeline(sources)
+    manifest = {"sample": sample, "note": "未归档的本班预览导出"}
+    payload = export_shift(manifest, results)
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="shift-preview.zip"'},
+    )
+
+
 @router.get("/{run_id}")
 def show_batch(run_id: str, request: Request):
     manifest, _ = request.app.state.store.read(run_id)
@@ -48,8 +65,16 @@ def rerun_batch(run_id: str, request: Request):
 @router.get("/{run_id}/export")
 def download(run_id: str, request: Request):
     manifest, results = request.app.state.store.read(run_id)
+    if manifest["sample"] == "shift":
+        media, filename, payload = (
+            "application/zip", f"shift-{run_id[:12]}.zip", export_shift(manifest, results),
+        )
+    else:
+        media, filename, payload = (
+            "application/zip", f"axle-{run_id[:12]}.zip", export_bundle(manifest, results),
+        )
     return Response(
-        content=export_bundle(manifest, results),
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="axle-{run_id[:12]}.zip"'},
+        content=payload,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

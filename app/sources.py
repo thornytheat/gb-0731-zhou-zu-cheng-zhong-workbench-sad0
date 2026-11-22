@@ -4,7 +4,11 @@ from pathlib import Path
 from app.config import MAX_FILE_BYTES
 from app.errors import DomainError
 
-SAMPLES = {"dirty": "东门晚班 · 原始采样", "clean": "南门校验 · 对照采样"}
+SAMPLES = {
+    "dirty": "东门晚班 · 原始采样",
+    "clean": "南门校验 · 对照采样",
+    "shift": "东门短途 · 趟次班",
+}
 
 
 @dataclass(frozen=True)
@@ -16,6 +20,13 @@ class Source:
 def sample_files(sample):
     if sample not in SAMPLES:
         raise DomainError("SAMPLE_UNKNOWN", 404)
+    if sample == "shift":
+        return {
+            "passes": "shift-passes.csv",
+            "triggers": "shift-triggers.csv",
+            "weighings": "shift-weighings.csv",
+            "certificates": "shift-certificates.csv",
+        }
     return {
         "triggers": f"{sample}-triggers.csv",
         "tickets": f"{sample}-tickets.csv",

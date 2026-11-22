@@ -3,8 +3,19 @@ from time import perf_counter_ns
 from app.errors import DomainError
 from app.manifest import canonical, clock, digest, identify
 from app.modules.m7_batches.pipeline import run_pipeline
+from app.modules.m8_settlement.pipeline import run_shift_pipeline
 from app.sources import read_sources
 from app.store import add_events, add_run, find
+
+
+def _run(sample, sources, events=None):
+    if sample == "shift":
+        return run_shift_pipeline(sources, events=events)
+    return run_pipeline(sources, events=events)
+
+
+def _ledger(sample, results):
+    return results["settlement"]["ledger"] if sample == "shift" else results["reconcile"]["ledger"]
 
 
 def commit_sample(store, source_dir, sample):
@@ -18,13 +29,13 @@ def commit_sample(store, source_dir, sample):
             return existing[0], True
         started = perf_counter_ns()
         events = [(clock(), "info", "START", "开始读取称重源文件", None)]
-        results = run_pipeline(sources, events=events)
+        results = _run(sample, sources, events)
         manifest = {
             **identity,
             "created_at": clock(),
             "elapsed_ms": (perf_counter_ns() - started) // 1_000_000,
             "result_sha256": digest(canonical(results).encode("utf-8")),
-            "ledger": results["reconcile"]["ledger"],
+            "ledger": _ledger(sample, results),
         }
         add_run(db, manifest, results)
         add_events(db, run_id, events + [(manifest["created_at"], "ok", "COMMITTED", "批次已归档", None)])
@@ -37,7 +48,7 @@ def replay_sample(store, source_dir, run_id):
     current = read_sources(source_dir, sample)
     if identify(sample, current)["run_id"] != run_id:
         raise DomainError("SOURCE_CHANGED", 409)
-    recomputed = run_pipeline(current)
+    recomputed = _run(sample, current)
     if canonical(recomputed) != canonical(original):
         raise DomainError("REPLAY_MISMATCH", 409)
     with store.transaction() as db:

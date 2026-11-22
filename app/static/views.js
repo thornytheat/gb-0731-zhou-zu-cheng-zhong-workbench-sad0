@@ -24,8 +24,14 @@ export function dateTime(value) {
 const col = (label, read, numeric = false) => ({label, read, numeric});
 const source = (obj) => obj.source.ref;
 const joined = (list) => list?.join(" / ");
-const labels = {pass: "正常", warn: "偏载", severe: "严重", matched: "已核平", review: "待复秤"};
-const styles = {pass: "ok", warn: "warn", severe: "bad", matched: "ok", review: "warn"};
+const labels = {
+  pass: "正常", warn: "偏载", severe: "严重", matched: "已核平", review: "待复秤",
+  settle: "可结算", hold: "暂挂",
+};
+const styles = {
+  pass: "ok", warn: "warn", severe: "bad", matched: "ok", review: "warn",
+  settle: "ok", hold: "bad",
+};
 const displayStatus = (level) => ({text: labels[level], level: styles[level]});
 
 const issueColumns = [
@@ -43,6 +49,8 @@ const wheelColumns = [
 export function moduleViews(name, snapshot, history) {
   const data = snapshot?.data;
   const stage = data?.[name];
+  const empty = {summary: "当前数据源不含该阶段", views: [["暂无数据", [], [col("提示", () => "请切换数据源")]]]};
+  if (!stage && !["batches", "settlement"].includes(name)) return empty;
   switch (name) {
     case "intake": return {summary: stage ? `${stage.encoding} · ${stage.segments} 段 · ${stage.blank} 空行 · ${stage.late} 乱序` : "", views: [
       ["采样记录", stage?.accepted, [
@@ -91,6 +99,56 @@ export function moduleViews(name, snapshot, history) {
         col("复秤证据", (r) => joined(r.review_refs)),
       ]], ["磅单隔离", stage?.ticket_issues, issueColumns], ["触发隔离汇总", data?.quarantine, issueColumns],
     ]};
+    case "settlement": return {
+      summary: stage ? `${stage.ledger.settled} 趟结算 · ${stage.ledger.held} 趟暂挂 · ${stage.ledger.orphans} 条无主过磅` : "",
+      views: [
+        ["趟次结果", stage?.rows, [
+          col("趟次", (r) => r.trip_id), col("车次", (r) => r.pass_id), col("车牌", (r) => r.plate),
+          col("状态", (r) => displayStatus(r.status)),
+          col("计费进磅", (r) => r.gross_id), col("毛重 kg", (r) => r.gross_kg, true),
+          col("计费回磅", (r) => r.tare_id), col("皮重 kg", (r) => r.tare_kg, true),
+          col("计费净重 kg", (r) => r.net_kg, true), col("暂挂原因", (r) => joined(r.codes)),
+          col("车次档案", (r) => r.pass_ref),
+        ]],
+        ["过磅归属", stage?.rows.flatMap((trip) => trip.entries.map((entry) => ({
+          ...entry, trip_id: trip.trip_id, pass_id: trip.pass_id,
+        }))), [
+          col("趟次", (r) => r.trip_id), col("过磅号", (r) => r.weighing_id),
+          col("类型", (r) => ({gross: "进磅", regross: "复磅", tare: "回磅"})[r.kind]),
+          col("过磅时刻", (r) => clock(r.time)), col("磅单", (r) => r.ticket_id),
+          col("版次", (r) => r.revision, true), col("磅单 kg", (r) => r.ticket_kg, true),
+          col("轮载 kg", (r) => r.wheel_kg, true), col("差额 kg", (r) => r.difference_kg, true),
+          col("可采信", (r) => r.eligible ? "是" : "否"), col("计费选中", (r) => r.chosen ? "是" : "否"),
+          col("晚到", (r) => r.late ? "晚到" : ""), col("原因码", (r) => joined(r.codes)),
+          col("过磅源行", (r) => r.source_ref), col("轮载证据", (r) => joined(r.wheel_refs)),
+          col("缺证依据", (r) => joined(r.issue_refs)), col("磅单冲突", (r) => joined(r.ticket_refs)),
+        ]],
+        ["无主过磅", stage?.orphans, [
+          col("过磅号", (r) => r.weighing_id), col("车次", (r) => r.pass_id),
+          col("类型", (r) => ({gross: "进磅", regross: "复磅", tare: "回磅"})[r.kind]),
+          col("过磅时刻", (r) => clock(r.time)), col("磅单", (r) => r.ticket_id),
+          col("版次", (r) => r.revision, true), col("总重 kg", (r) => r.ticket_kg, true),
+          col("晚到", (r) => r.late ? "晚到" : ""), col("原因码", (r) => joined(r.codes)),
+          col("源行", (r) => r.source_ref),
+        ]],
+        ["磅单版次投票", stage?.ticket_votes, [
+          col("磅单号", (r) => r.ticket_id), col("版次", (r) => r.revision, true),
+          col("状态", (r) => r.conflict ? displayStatus("hold") : displayStatus("settle")),
+          col("投票源行", (r) => joined(r.refs)),
+        ]],
+        ["过磅轮载档案", data?.dossiers?.flatMap((dossier) => dossier.axes.map((axis) => ({
+          ...axis, weighing_id: dossier.weighing_id,
+        }))) ?? [], [
+          col("过磅号", (r) => r.weighing_id), col("轴号", (r) => r.id),
+          col("轴时刻", (r) => clock(r.time)),
+          col("左轮 kg", (r) => r.left_kg, true), col("右轮 kg", (r) => r.right_kg, true),
+          col("轴重 kg", (r) => r.total_kg, true),
+          col("偏载率 %", (r) => r.percent, true), col("判级", (r) => displayStatus(r.level)),
+          col("左轮证据", (r) => r.left_ref), col("右轮证据", (r) => r.right_ref),
+        ]],
+        ["触发隔离", data?.quarantine, issueColumns],
+      ],
+    };
     case "batches": return {summary: `${history.length} 条归档`, views: [
       ["归档批次", history, [
         col("批次号", (r) => ({text: r.run_id.slice(0, 12), run: r.run_id})),
